@@ -1,0 +1,30 @@
+// Include Lua libraries
+from native reference inspect;
+
+// Include other CBLang-2 code
+include examples.other;
+
+class Main {
+   function Main() {
+      TryQuit(false);
+
+      instance = OtherClass();
+      print(instance:Add(1, 2));
+
+      instance = false;
+
+      TryQuit(true);
+
+      print(instance:Add(2, 3));
+      // ^ This line will never be reached
+   }
+
+   function TryQuit(shouldQuit) {
+      if (shouldQuit == true) {
+         print("Quitting");
+         os.exit();
+      } else {
+         print("Did not quit");
+      }
+   }
+}

@@ -1,0 +1,10 @@
+class OtherClass {
+   // Constructor
+   function Start() {
+      print("Created a new instance of OtherClass!");
+   }
+
+   function Add(a, b) {
+      return a + b;
+   }
+}

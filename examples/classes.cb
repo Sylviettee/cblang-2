@@ -1,0 +1,15 @@
+class Main
+{
+    function Main()
+    {
+        Other.Test();
+    }
+}
+
+class Other
+{
+    static function Test()
+    {
+        print("This code was printed from a static method in Other");
+    }
+}

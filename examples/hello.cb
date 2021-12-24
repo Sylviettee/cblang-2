@@ -1,0 +1,8 @@
+class Main()
+{
+    function Main()
+    {
+        //Here is a comment!
+        print("Hello World");
+    }
+}
