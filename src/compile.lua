@@ -75,7 +75,11 @@ local function compile(source, file, included)
    end
 
    local function pushIndent(...)
-      table.insert(buff, string.rep(' ', (#scopes - 2) * 3) .. table.concat({ ... }))
+      table.insert(buff, string.rep(' ', (#scopes - 1) * 3) .. table.concat({ ... }))
+   end
+
+   local function pushAfterHeader(...)
+      table.insert(buff, 1, table.concat({ ... }))
    end
 
    local function pushErr(msg, node)
@@ -160,7 +164,11 @@ local function compile(source, file, included)
       dec()
    end
 
-   visitors.Chunk = visitors.Block
+   function visitors.Chunk(node)
+      for i = 1, #node do
+         visitors.visit(node[i], true)
+      end
+   end
 
    function visitors.BaseInclude(node)
       local adjustedPath = {}
@@ -189,9 +197,9 @@ local function compile(source, file, included)
          errorBuff = errorBuff,
          scopes = scopes,
          header = header,
-      }):match('^%s*(.-)%s*$')
+      })
 
-      table.insert(header, '--- ' .. adjustedPath .. ' ---\n' .. contents .. '\n--- END ---\n')
+      table.insert(header, '--- ' .. adjustedPath .. ' ---\n' .. contents)
    end
 
    function visitors.FromNative(node)
@@ -240,7 +248,7 @@ local function compile(source, file, included)
 
       table.insert(header.vars, name)
 
-      pushIndent(name, ' = {}\n')
+      pushIndent(name, ' = {}\n\n')
       pushIndent('setmetatable(', name, ', {\n')
 
       inc()
@@ -272,7 +280,7 @@ local function compile(source, file, included)
 
       dec()
 
-      pushIndent('})')
+      pushIndent('})\n')
 
       local hasStart, hasMainFn
 
@@ -299,10 +307,8 @@ local function compile(source, file, included)
          end
       end
 
-      push('\n')
-
       if not hasStart then
-         pushIndent('function ', node.name[1], ':Start() end')
+         pushIndent('\nfunction ', node.name[1], ':Start() end\n')
       end
 
       if name == 'Main' then
@@ -312,6 +318,8 @@ local function compile(source, file, included)
             pushErr('The Main class should have a Main method', node)
          end
       end
+
+      push('\n')
    end
 
    function visitors.FunctionCb(node, parent)
@@ -332,7 +340,7 @@ local function compile(source, file, included)
       for i = 1, #parent do
          local fn = parent[i]
 
-         if fn.name[1] ~= 'Main' or fn.static then
+         if fn.name[1] ~= 'Main' and not fn.static then
             pushVar(fn.name[1], fn, true, {
                method = true
             })
@@ -341,6 +349,12 @@ local function compile(source, file, included)
 
       for i = 1, #node.args do
          pushVar(node.args[i][1], node.args[i])
+      end
+
+      if not node.static then
+         pushVar('this', node, true, {
+            self = true
+         })
       end
 
       for i = 1, #node do
@@ -353,7 +367,7 @@ local function compile(source, file, included)
 
       dec()
 
-      pushIndent('end')
+      pushIndent('end\n')
    end
 
    function visitors.Statement(node)
@@ -420,7 +434,7 @@ local function compile(source, file, included)
       push('\n')
 
       -- repeat has delayed scope closing
-      push(string.rep((#scopes - 3) * 3, ' ') .. 'until ')
+      push(string.rep((#scopes - 2) * 3, ' ') .. 'until ')
 
       visitors.visit(node[2])
 
@@ -786,21 +800,27 @@ local function compile(source, file, included)
       return children
    end
 
-   function visitors.DotIndex(node)
+   local function assemblyPath(node, hasMethod)
       local path = drill(node)
 
       for i = #path, 1, -1 do
          local element = path[i]
 
          if i == #path then
-            if not getVar(element) then
+            local var = getVar(element)
+
+            if not var then
                pushErr('Undefined variable ' .. element, node)
+            elseif var.self then
+               element = 'self'
             end
          end
 
          if type(element) == 'string' then
-            if i ~= #path then
+            if not hasMethod and i ~= #path then
                push('.')
+            elseif hasMethod and i == 1 then
+               push(':')
             end
 
             push(element)
@@ -814,6 +834,10 @@ local function compile(source, file, included)
       end
    end
 
+   function visitors.DotIndex(node)
+      assemblyPath(node)
+   end
+
    function visitors.Call(node, parent)
       if parent then
          pushIndent()
@@ -825,31 +849,7 @@ local function compile(source, file, included)
       if var and var.method then
          push('self:', name)
       else
-         local path = drill(node[2])
-
-         for i = #path, 1, -1 do
-            local element = path[i]
-
-            if i == #path then
-               if not getVar(element) then
-                  pushErr('Undefined variable ' .. element, node)
-               end
-            end
-
-            if type(element) == 'string' then
-               if i ~= #path then
-                  push('.')
-               end
-
-               push(element)
-            else
-               push('[')
-
-               visitors.visit(element)
-
-               push(']')
-            end
-         end
+         assemblyPath(node[2])
       end
 
       push('(')
@@ -870,33 +870,7 @@ local function compile(source, file, included)
          pushIndent()
       end
 
-      local path = drill(node)
-
-      for i = #path, 1, -1 do
-         local element = path[i]
-
-         if i == #path then
-            if not getVar(element) then
-               pushErr('Undefined variable ' .. element, node)
-            end
-         end
-
-         if type(element) == 'string' then
-            if i ~= 1 and i ~= #path then
-               push('.')
-            elseif i == 1 then
-               push(':')
-            end
-
-            push(element)
-         else
-            push('[')
-
-            visitors.visit(element)
-
-            push(']')
-         end
-      end
+      assemblyPath(node, true)
 
       push('(')
 
@@ -922,13 +896,15 @@ local function compile(source, file, included)
    visitors.visit(ast)
 
    if not included then
-      table.insert(buff, 1, table.concat(header))
+      pushAfterHeader('\n', table.concat(header))
 
       if header.toLoad then
-         table.insert(buff, 1, '--- END ---\n')
-
          for i = 1, #header.toLoad do
-            table.insert(buff, 1, '__globalLoader(require "' .. header.toLoad[i] .. '")\n')
+            pushAfterHeader(
+               '__globalLoader(require \'',
+               header.toLoad[i],
+               i ~= #header.toLoad and '\')\n' or '\')'
+            )
          end
 
          local loader = table.concat({
@@ -940,42 +916,46 @@ local function compile(source, file, included)
             'end\n'
          }, '\n')
 
-         table.insert(buff, 1, loader)
+         pushAfterHeader(loader)
 
-         table.insert(buff, 1, '--- Global Loader ---\n')
+         pushAfterHeader('--- Global Loader ---\n')
       end
 
       if header.toRequire then
-         table.insert(buff, 1, '--- END ---\n')
-
          for i = 1, #header.toRequire do
             local path = header.toRequire[i]
 
-            table.insert(buff, 1, path[#path] .. ' = require "' .. table.concat(path, '.') .. '"\n')
+            pushAfterHeader(
+               path[#path],
+               ' = require \'',
+               table.concat(path, '.'),
+               i == #header.toRequire and '\'\n' or '\''
+            )
          end
 
-         table.insert(buff, 1, '--- Requires ---\n')
+         pushAfterHeader('--- Requires ---\n')
       end
 
       if header.vars then
-         table.insert(buff, 1, 'local ' .. table.concat(header.vars, ', ') .. '\n')
+         pushAfterHeader('local ', table.concat(header.vars, ', '), '\n')
+
+         pushAfterHeader('--- Hoisting ---\n')
       end
 
       if not hasMain then
          pushIndent('return {\n')
 
-         inc()
-
          for i = 1, #exports do
-            pushIndent(exports[i], ' = ', exports[i], i ~= #exports and ',' or '', '\n')
+            -- Scopes should all be closed at this point
+            push('   ', exports[i], ' = ', exports[i], i ~= #exports and ',' or '', '\n')
          end
-
-         dec()
 
          pushIndent('}')
       else
          pushIndent('Main():Main()')
       end
+
+      push('\n') -- Final new line
    end
 
    for i = 1, #errors do
@@ -986,7 +966,14 @@ local function compile(source, file, included)
       table.insert(errorBuff, string.format('%s:%u:%u: %s', file, col, line, error.msg))
    end
 
-   return table.concat(buff), errorBuff
+   buff = table.concat(buff)
+
+   if package.config:sub(1, 1) == '\\' then
+      -- Use Windows newline
+      buff = buff:gsub('\n', '\r\n')
+   end
+
+   return buff, errorBuff
 end
 
 return compile
