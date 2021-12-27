@@ -2,7 +2,7 @@ local parse = require 'parse'
 local rex = require 'lpegrex'
 
 local function initScope()
-   local g = { const = true, start = 0, stop = 0 }
+   local g = { const = true, used = true, start = 0, stop = 0 }
 
    return {
       _G = g,
@@ -46,7 +46,11 @@ end
 
 
 -- I learned the oversized function trick from Teal (tl.type_check is 4k lines)
-local function compile(source, file, included)
+local function compile(source, file, included, files)
+   files = files or {}
+
+   files[file] = source
+
    local ast, err = parse(source)
 
    if not ast then
@@ -62,12 +66,11 @@ local function compile(source, file, included)
    end
 
    local scopes = included and included.scopes or { initScope() }
-   local errorBuff = included and included.errorBuff or {}
+   local errors = included and included.errors or {}
    local header = included and included.header or {}
 
    local hasMain = false
    local exports = {}
-   local errors = {}
    local buff = {}
 
    local function push(...)
@@ -82,11 +85,12 @@ local function compile(source, file, included)
       table.insert(buff, 1, table.concat({ ... }))
    end
 
-   local function pushErr(msg, node)
+   local function pushErr(msg, node, otherFile)
       table.insert(errors, {
          msg = msg,
          start = node.pos,
-         stop = node.endpos
+         stop = node.endpos,
+         file = otherFile or file,
       })
    end
 
@@ -108,7 +112,7 @@ local function compile(source, file, included)
             return pushErr('shadowing global variable', node)
          end
 
-         local _, line = rex.calcline(source, var.start)
+         local _, line = rex.calcline(source, var.node.start)
 
          pushErr('shadowing local variable declared at line ' .. line, node)
       end
@@ -119,8 +123,8 @@ local function compile(source, file, included)
 
       local base = {
          const = const or node[2] == 'const',
-         start = node.pos,
-         stop = node.endpos
+         node = node,
+         file = file
       }
 
       if extra then
@@ -130,6 +134,21 @@ local function compile(source, file, included)
       end
 
       scopes[#scopes][name] = base
+
+      return base
+   end
+
+   local function errUnused(scope)
+      for name, var in pairs(scope) do
+         -- Children are checked when the parent is checked
+         if not var.used then
+            if var.kind == 'this' then
+               pushErr('Unused variable this, consider using a static method', var.node)
+            else
+               pushErr('Unused ' .. (var.kind or 'variable') .. ' ' .. name, var.node, var.file)
+            end
+         end
+      end
    end
 
    local function inc()
@@ -137,7 +156,7 @@ local function compile(source, file, included)
    end
 
    local function dec()
-      table.remove(scopes)
+      errUnused(table.remove(scopes))
    end
 
    -- AAAAAAAAAAAAAAAAAAAAAAAAAAAAA
@@ -194,10 +213,10 @@ local function compile(source, file, included)
       end
 
       contents = compile(contents, adjustedPath, {
-         errorBuff = errorBuff,
+         errors = errors,
          scopes = scopes,
          header = header,
-      })
+      }, files)
 
       table.insert(header, '--- ' .. adjustedPath .. ' ---\n' .. contents)
    end
@@ -262,9 +281,12 @@ local function compile(source, file, included)
       if node.args then
          for i = 1, #node.args do
             local arg = node.args[i]
+            local var = getVar(arg[1])
 
-            if not getVar(arg[1]) then
+            if not var then
                pushErr('Undefined variable ' .. arg[1], arg)
+            else
+               var.used = true
             end
 
             pushIndent('setmetatable(self, { __index = ', arg[1], '})\n')
@@ -283,6 +305,20 @@ local function compile(source, file, included)
       pushIndent('})\n')
 
       local hasStart, hasMainFn
+
+      inc()
+
+      for i = 1, #node do
+         local fn = node[i]
+         local fnName = fn.name[1]
+
+         if fnName ~= 'Main' and not fn.static then
+            pushVar(fnName, fn, true, {
+               kind = 'method',
+               used = true
+            })
+         end
+      end
 
       for i = 1, #node do
          push('\n')
@@ -311,6 +347,8 @@ local function compile(source, file, included)
          pushIndent('\nfunction ', node.name[1], ':Start() end\n')
       end
 
+      dec()
+
       if name == 'Main' then
          hasMain = true
 
@@ -323,7 +361,9 @@ local function compile(source, file, included)
    end
 
    function visitors.FunctionCb(node, parent)
-      pushIndent('function ', parent.name[1], (node.static and '.' or ':'), node.name[1], '(')
+      local name = node.name[1]
+
+      pushIndent('function ', parent.name[1], (node.static and '.' or ':'), name, '(')
 
       for i = 1, #node.args do
          if i ~= 1 then
@@ -337,23 +377,17 @@ local function compile(source, file, included)
 
       inc()
 
-      for i = 1, #parent do
-         local fn = parent[i]
-
-         if fn.name[1] ~= 'Main' and not fn.static then
-            pushVar(fn.name[1], fn, true, {
-               method = true
-            })
-         end
-      end
-
       for i = 1, #node.args do
-         pushVar(node.args[i][1], node.args[i])
+         pushVar(node.args[i][1], node.args[i], false, {
+            kind = 'argument'
+         })
       end
 
       if not node.static then
          pushVar('this', node, true, {
-            self = true
+            kind = 'this',
+            -- sometimes you have to use a method instead of a static method
+            used = true
          })
       end
 
@@ -705,6 +739,8 @@ local function compile(source, file, included)
 
       if not var then
          pushErr('Undefined variable ' .. node[1], node)
+      else
+         var.used = true
       end
 
       if node[1] == 'this' then
@@ -814,6 +850,10 @@ local function compile(source, file, included)
             elseif var.self then
                element = 'self'
             end
+
+            if var then
+               var.used = true
+            end
          end
 
          if type(element) == 'string' then
@@ -846,10 +886,15 @@ local function compile(source, file, included)
       local name = node[2][1]
       local var = getVar(name)
 
-      if var and var.method then
+      if var and var.kind == 'method' then
+         var.used = true
          push('self:', name)
       else
          assemblyPath(node[2])
+      end
+
+      if var and var.kind == 'class' then
+         var.used = true
       end
 
       push('(')
@@ -889,13 +934,24 @@ local function compile(source, file, included)
       local node = ast[i]
 
       if node.tag == 'Class' then
-         pushVar(node.name[1], node, true)
+         local var = pushVar(node.name[1], node, true, {
+            kind = 'class',
+            children = {}
+         })
+
+         if node.name[1] == 'Main' then
+            var.used = true
+         end
+
+         node.var = var
       end
    end
 
    visitors.visit(ast)
 
    if not included then
+      errUnused(scopes[#scopes])
+
       pushAfterHeader('\n', table.concat(header))
 
       if header.toLoad then
@@ -958,12 +1014,14 @@ local function compile(source, file, included)
       push('\n') -- Final new line
    end
 
+   local formattedErrors = {}
+
    for i = 1, #errors do
       local error = errors[i]
 
-      local col, line = rex.calcline(source, error.start)
+      local col, line = rex.calcline(files[error.file], error.start)
 
-      table.insert(errorBuff, string.format('%s:%u:%u: %s', file, col, line, error.msg))
+      table.insert(formattedErrors, string.format('%s:%u:%u: %s', error.file, col, line, error.msg))
    end
 
    buff = table.concat(buff)
@@ -973,7 +1031,7 @@ local function compile(source, file, included)
       buff = buff:gsub('\n', '\r\n')
    end
 
-   return buff, errorBuff
+   return buff, formattedErrors
 end
 
 return compile
