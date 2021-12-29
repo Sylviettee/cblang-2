@@ -1,4 +1,4 @@
 #!/usr/bin/env bash
 
 # Note; Luarocks should be used for installing
-lua -e "package.path='./src/?.lua;'..package.path" src/main.lua $@
+lua cblang/main.lua $@

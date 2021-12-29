@@ -1,4 +1,4 @@
-local compile = require 'compile'
+local compile = require 'cblang.compile'
 
 local mode, input, output = ...
 

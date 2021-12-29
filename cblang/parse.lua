@@ -1,4 +1,4 @@
-local util = require 'parseUtil'
+local util = require 'cblang.parseUtil'
 local rex = require 'lpegrex'
 
 local grammar = rex.compile([[

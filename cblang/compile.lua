@@ -1,4 +1,4 @@
-local parse = require 'parse'
+local parse = require 'cblang.parse'
 local rex = require 'lpegrex'
 
 local function initScope()
