@@ -78,7 +78,7 @@ local function compile(source, file, included, files)
    end
 
    local function pushIndent(...)
-      table.insert(buff, string.rep(' ', (#scopes - 1) * 3) .. table.concat({ ... }))
+      table.insert(buff, string.rep(' ', (#scopes - 2) * 3) .. table.concat({ ... }))
    end
 
    local function pushAfterHeader(...)
@@ -293,7 +293,7 @@ local function compile(source, file, included, files)
          end
       end
 
-      pushIndent('self:Start()\n')
+      pushIndent('self:Start(...)\n')
       pushIndent('return self\n')
 
       dec()
@@ -468,7 +468,7 @@ local function compile(source, file, included, files)
       push('\n')
 
       -- repeat has delayed scope closing
-      push(string.rep((#scopes - 2) * 3, ' ') .. 'until ')
+      push(string.rep(' ', (#scopes - 3) * 3) .. 'until ')
 
       visitors.visit(node[2])
 
@@ -622,7 +622,62 @@ local function compile(source, file, included, files)
       end
    end
 
+   local function assignOp(node)
+      pushIndent()
+
+      for i = 1, #node[1] do
+         if i ~= 1 then
+            push(', ')
+         end
+
+         local left = node[1][i]
+
+         if left.tag == 'Id' then
+            local var = getVar(left[1])
+
+            if var and var.const then
+               pushErr('Unable to assign to constant variable', left)
+            end
+         end
+
+         visitors.visit(node[1][i])
+      end
+
+      push(' = ')
+
+      local toOp = #node[3] == 1 and node[3][1]
+
+      if #node[1] ~= #node[3] and not toOp then
+         -- With x, y, z = 3, it might be correct
+         -- x, y, z += 1 is always incorrect
+         pushErr('Unbalanced assignment', node)
+      end
+
+      for i = 1, #node[1] do
+         if i ~= 1 then
+            push(', ')
+         end
+
+         visitors.visit(node[1][i])
+
+         push(' ', node[2], ' ')
+
+         if toOp then
+            visitors.visit(toOp)
+         elseif node[3][i] then
+            visitors.visit(node[3][i])
+         else
+            push('nil')
+         end
+      end
+   end
+
    function visitors.Assign(node)
+      if node[3] then
+         -- Skip trying to define
+         return assignOp(node)
+      end
+
       local toDefine = {}
       local toAssign = {}
 
@@ -635,7 +690,7 @@ local function compile(source, file, included, files)
             local var = getVar(left[1])
 
             if var and var.const then
-               pushErr('Unable to assign to constant variable', node)
+               pushErr('Unable to assign to constant variable', left)
             elseif not var then
                table.insert(toDefine, i)
 
@@ -706,20 +761,7 @@ local function compile(source, file, included, files)
    end
 
    function visitors.String(node)
-      push('\'',
-         node[1]:gsub('[\\\'\a\b\f\n\r\t\v\z]', {
-            ['\\'] = '\\\\',
-            ['\''] = '\\\'',
-            ['\a'] = '\\a',
-            ['\b'] = '\\b',
-            ['\f'] = '\\f',
-            ['\n'] = '\\n',
-            ['\r'] = '\\r',
-            ['\t'] = '\\t',
-            ['\v'] = '\\v',
-            ['\z'] = '\\z'
-         }
-      ), '\'')
+      push('\'', node[1], '\'')
    end
 
    function visitors.Boolean(node)

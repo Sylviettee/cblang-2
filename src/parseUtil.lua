@@ -41,13 +41,13 @@ Goto          <== `goto` @NAME @`;`
 Do            <== `{` Block @`}`
 While         <== `while` @`(` @expr @`)` @`{` Block @`}`
 Repeat        <== `do` `{` Block `}` @`while` @`(` @expr @`)`
-If            <== `if` @`(` @expr @`)` @`{` Block @`}` {| (`else` `if` `(` @expr @`)` @`{` Block @`}`)* |} (`else` @`{` Block @`}`)?
+If            <== `if` @`(` @expr @`)` @`{` Block @`}` 
+                  {| (`else` `if` `(` @expr @`)` @`{` Block @`}`)* |} 
+                  (`else` @`{` Block @`}`)?
 ForNum        <== `for` @`(` Id `=` @expr @`,` @expr (`,` @expr)? `)` @`{` Block @`}`
 ForIn         <== `for` @`(` @idlist `in` @exprlist @`)` @`{` Block @`}`
--- FuncDef    <== `function` @funcname funcbody
--- FuncDecl   <== `local` `function` @Id funcbody
 VarDecl       <== `local` @iddecllist (`=` @exprlist)? @`;`
-Assign        <== varlist `=` @exprlist  @`;`
+Assign        <== varlist {ASSIGN_OP}? `=` @exprlist  @`;`
 
 Number        <== NUMBER->tonumber SKIP
 String        <== STRING SKIP
@@ -71,7 +71,6 @@ callsuffix    <-- Call / CallMethod
 var           <-- (exprprimary (callsuffix+ indexsuffix / indexsuffix)+)~>rfoldright / Id
 call          <-- (exprprimary (indexsuffix+ callsuffix / callsuffix)+)~>rfoldright
 exprsuffixed  <-- (exprprimary (indexsuffix / callsuffix)*)~>rfoldright
-funcname      <-- (Id DotIndex* ColonIndex?)~>rfoldright
 funcbody      <-- @`(` funcargs @`)` @`{` Block @`}`
 field         <-- Pair / expr
 fieldsep      <-- `,` / `;`
@@ -114,17 +113,19 @@ exprprimary   <-- Id / Paren
 STRING        <-- STRING_SHRT / STRING_LONG
 STRING_LONG   <-- {:LONG_OPEN {LONG_CONTENT} @LONG_CLOSE:}
 STRING_SHRT   <-- {:QUOTE_OPEN {~QUOTE_CONTENT~} @QUOTE_CLOSE:}
+
 QUOTE_OPEN    <-- {:qe: ['"] :}
 QUOTE_CONTENT <-- (ESCAPE_SEQ / !(QUOTE_CLOSE / LINEBREAK) .)*
 QUOTE_CLOSE   <-- =qe
-ESCAPE_SEQ    <-- '\'->'' @ESCAPE
-ESCAPE        <-- [\'"] /
-                  ('n' $10 / 't' $9 / 'r' $13 / 'a' $7 / 'b' $8 / 'v' $11 / 'f' $12)->tochar /
-                  ('x' {HEX_DIGIT^2} $16)->tochar /
-                  ('u' '{' {HEX_DIGIT^+1} '}' $16)->toutf8char /
-                  ('z' SPACE*)->'' /
-                  (DEC_DIGIT DEC_DIGIT^-1 !DEC_DIGIT / [012] DEC_DIGIT^2)->tochar /
-                  (LINEBREAK $10)->tochar
+
+ESCAPE_SEQ    <-- '\' @ESCAPE
+ESCAPE        <-- [\'"ntrabvf] /
+                  ('x' {HEX_DIGIT^2}) /
+                  ('u' '{' {HEX_DIGIT^+1} '}') /
+                  ('z' SPACE*) /
+                  (DEC_DIGIT DEC_DIGIT^-1 !DEC_DIGIT / [012] DEC_DIGIT^2) /
+                  (LINEBREAK $10)
+
 NUMBER        <-- {HEX_NUMBER / DEC_NUMBER}
 HEX_NUMBER    <-- '0' [xX] @HEX_PREFIX ([pP] @EXP_DIGITS)?
 DEC_NUMBER    <-- DEC_PREFIX ([eE] @EXP_DIGITS)?
@@ -136,6 +137,10 @@ LONG_CONTENT  <-- (!LONG_CLOSE .)*
 LONG_OPEN     <-- '[' {:eq: '='*:} '[' LINEBREAK?
 LONG_CLOSE    <-- ']' =eq ']'
 
+ASSIGN_OP     <-- '+' / '-' / '*' / '//' / '/' / '%' / '^' /
+                  '|' / '~' / '&' / '<<' / '>>' / '..' /
+                  'and' / 'or'
+
 NAME          <-- !KEYWORD {NAME_PREFIX NAME_SUFFIX?} SKIP
 NAME_PREFIX   <-- [_a-zA-Z]
 NAME_SUFFIX   <-- [_a-zA-Z0-9]+
@@ -144,8 +149,10 @@ SKIP          <-- %Skip
 
 SPACE         <-- %sp
 LINEBREAK     <-- %cn %cr / %cr %cn / %cn / %cr
+
 HEX_DIGIT     <-- [0-9a-fA-F]
 DEC_DIGIT     <-- [0-9]
+
 EXTRA_TOKENS  <-- `[[` `[=` -- unused rule, here just to force defining these tokens
 ]==]
 
