@@ -2,23 +2,23 @@ local util = require 'cblang.parseUtil'
 local rex = require 'lpegrex'
 
 local grammar = rex.compile([[
-Chunk         <== SKIP Include* Class*
+Chunk         <== SKIP Include* Class* !.^ExpectedEof
 
 Include       <-- (BaseInclude / FromNative / FromNativeRef) `;`
-BaseInclude   <== `include` {:path: @Path :}
-FromNative    <== `from` @`native` `include` {:path: @Path :}
-FromNativeRef <== `from` @`native` `reference` {:path: @Path :}
-Path          <-| Ident (`.` @Ident)*
+BaseInclude   <== `include` @Path
+FromNative    <== `from` @`native` `include` @Path
+FromNativeRef <== `from` @`native` `reference` @Path
+Path          <-| Id (`.` @Id)*
 
-Class         <== `class` {:name: Ident :} {:args: ClassArgs? :} ClassBody
-ClassArgs     <== `(` (Ident (`,` Ident)*)? `)`
-ClassBody     <-- `{` FunctionCb* `}`
+Class         <== `class` @Id Args? ClassBody
+ClassBody     <== @`{` FunctionCb* @`}`
 
-FunctionCb    <== (`static` {:static: $true :})? `function` {:name: @Ident :} {:args: FuncArgs :} FuncBody
-FuncArgs      <== @`(` (Ident (`,` @Ident)*)? @`)`
-FuncBody      <-- @`{` Statement* @`}`
+FunctionCb    <== ((`static` $true) / $false) `function` @Id @Args FuncBody
+FuncBody      <== @`{` Statement* @`}`
 
-Ident         <== NAME
+Args          <== `(` (Id (`,` @Id)*)? @`)`
+
+Id            <== NAME
 
 Statement     <== %LuaStatement
 
@@ -27,6 +27,11 @@ NAME_PREFIX   <-- [_a-zA-Z]
 NAME_SUFFIX   <-- [_a-zA-Z0-9]+
 
 SKIP          <-- %Skip
+
+EXTRA_TOKENS  <-- `and` `break` `do` `else` `elseif` `end`
+                  `false` `for` `function` `goto` `if` `in`
+                  `local` `nil` `not` `or` `repeat` `return`
+                  `then` `true` `until` `while`
 ]],  {
    Skip = util.skip,
    LuaStatement = util.statement
