@@ -41,8 +41,8 @@ Goto          <== `goto` @NAME @`;`
 Do            <== `{` Block @`}`
 While         <== `while` @`(` @expr @`)` @`{` Block @`}`
 Repeat        <== `do` `{` Block `}` @`while` @`(` @expr @`)`
-If            <== `if` @`(` @expr @`)` @`{` Block @`}` 
-                  {| (`else` `if` `(` @expr @`)` @`{` Block @`}`)* |} 
+If            <== `if` @`(` @expr @`)` @`{` Block @`}`
+                  {| (`else` `if` `(` @expr @`)` @`{` Block @`}`)* |}
                   (`else` @`{` Block @`}`)?
 ForNum        <== `for` @`(` Id `=` @expr @`,` @expr (`,` @expr)? `)` @`{` Block @`}`
 ForIn         <== `for` @`(` @idlist `in` @exprlist @`)` @`{` Block @`}`

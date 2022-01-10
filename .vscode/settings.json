@@ -2,5 +2,6 @@
    "Lua.diagnostics.disable": [
       // This is almost always incorrect (for me)
       "unbalanced-assignments"
-   ]
+   ],
+   "Lua.runtime.version": "LuaJIT"
 }

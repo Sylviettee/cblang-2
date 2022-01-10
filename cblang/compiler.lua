@@ -4,7 +4,8 @@ local checks = require 'cblang.checks'
 local parse = require 'cblang.parse'
 local rex = require 'lpegrex'
 
-unpack = table.unpack or unpack
+-- luacheck: ignore
+table.unpack = table.unpack or unpack
 
 local function globals()
    local g = { const = true, used = true, kind = 'global variable' }
@@ -67,7 +68,7 @@ end
 ---@field sym symbol?
 
 ---@class cache
----@field includedSym Set
+---@field includedSym table<symbol, boolean>
 
 ---@class error
 ---@field msg string
@@ -335,7 +336,7 @@ function compiler:checkCustomChecks()
    for i = 1, #self.toCheck do
       local fn = self.toCheck[i]
 
-      fn[1](self, unpack(fn[2]))
+      fn[1](self, table.unpack(fn[2]))
    end
 end
 
@@ -392,7 +393,7 @@ end
 function compiler:shadowVar(node, name)
    local var = self:getVar(name or node[1])
 
-   local _, line = var.node and rex.calcline(self.source, var.node.pos)
+   local line = var.node and select(2, rex.calcline(self.source, var.node.pos))
 
    self:pushErr(
       'shadowing '

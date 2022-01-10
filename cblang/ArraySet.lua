@@ -20,7 +20,7 @@ function ArraySet.new(arr)
 end
 
 -- Static to prevent name collisions
----@param set Set
+---@param set ArraySet
 ---@param name any
 function ArraySet.has(set, name)
    return set.set[name]
