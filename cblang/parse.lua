@@ -16,9 +16,10 @@ ClassBody     <== @`{` FunctionCb* @`}`
 FunctionCb    <== ((`static` $true) / $false) `function` @Id @Args FuncBody
 FuncBody      <== @`{` Statement* @`}`
 
-Args          <== `(` (Id (`,` @Id)*)? @`)`
+Args          <== `(` (Id (`,` Id)* (`,` Varargs^Expected_NameOrVararg)? / Varargs)? @`)`
 
 Id            <== NAME
+Varargs       <== `...`
 
 Statement     <== %LuaStatement
 

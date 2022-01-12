@@ -4,9 +4,6 @@ local checks = require 'cblang.checks'
 local parse = require 'cblang.parse'
 local rex = require 'lpegrex'
 
--- luacheck: ignore
-table.unpack = table.unpack or unpack
-
 local function globals()
    local g = { const = true, used = true, kind = 'global variable' }
 
@@ -468,6 +465,15 @@ function compiler:unbalancedAssign(node)
    )
 end
 
+---@param node baseNode
+function compiler:undefinedVararg(node)
+   self:pushErr(
+      'usage of vararg outside of vararg function',
+      'outside-vararg',
+      node
+   )
+end
+
 -- Variables
 
 ---@param name string
@@ -517,7 +523,7 @@ function compiler:pushVar(name, node, ext)
 
    local var = self:getVar(name)
 
-   if var then
+   if name ~= '...' and var then
       self:shadowVar(node, name)
 
       local raw = self.variables[name]
@@ -818,23 +824,24 @@ function compiler:FunctionCb(node, parent)
 
    self:pushIndent('function ', parent[1][1], (node[1] and '.' or ':'), name, '(')
 
+   self:inc()
+
    for i = 1, #node[3] do
       if i ~= 1 then
          self:push(', ')
       end
 
+      local arg = node[3][i]
+      local argName = arg.tag == 'Id' and arg[1] or '...'
+
       self:push(node[3][i][1])
-   end
 
-   self:push(')')
-
-   self:inc()
-
-   for i = 1, #node[3] do
-      self:pushVar(node[3][i][1], node[3][i], {
+      self:pushVar(argName, arg, {
          kind = 'argument'
       })
    end
+
+   self:push(')')
 
    if not node.static then
       self:pushVar('this', node, {
@@ -1226,7 +1233,15 @@ function compiler:Nil()
    self:push('nil')
 end
 
-function compiler:Varargs()
+function compiler:Varargs(node)
+   local var = self.scopes[#self.scopes]['...']
+
+   if var then
+      var.used = true
+   else
+      self:undefinedVararg(node)
+   end
+
    self:push('...')
 end
 
@@ -1251,19 +1266,46 @@ end
 function compiler:Function(node)
    self:push('function(')
 
+   self:inc()
+
    for i = 1, #node[1] do
       if i ~= 1 then
          self:push(', ')
       end
 
-      self:push(node[1][i])
+      local arg = node[1][i]
+      local name = arg.tag == 'Id' and arg[1] or '...'
+
+      self:push(name)
+
+      self:pushVar(name, arg, {
+         kind = 'argument'
+      })
    end
 
    self:push(')')
 
-   self:visit(node[2])
+   local indent
 
-   self:push('end')
+   for i = 1, #node[2] do
+      indent = true
+
+      self:push('\n')
+
+      self:visit(node[2][i], true)
+   end
+
+   if indent then
+      self:push('\n')
+   end
+
+   self:dec()
+
+   if indent then
+      self:pushIndent('end')
+   else
+      self:push(' end')
+   end
 end
 
 function compiler:Table(node)

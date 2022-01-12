@@ -1,3 +1,5 @@
+require 'cblang.minicompat'
+
 local compiler = require 'cblang.compiler'
 local config = require 'cblang.config'
 local rex = require 'lpegrex'
@@ -86,11 +88,11 @@ local function compile(file, isRan)
       table.insert(
          buff,
          'if not pcall(debug.getlocal, 4, 1) then\n' ..
-         single ..'Main():Main()\n' ..
+         single ..'Main():Main(...)\n' ..
          'end\n\n'
       )
    elseif isRan and mainExport and mainExport.hasMain then
-      table.insert(buff, 'Main():Main()\n')
+      table.insert(buff, 'Main():Main(...)\n')
    elseif isRan and mainExport then
       res:pushErr(
          'Main method not found',
@@ -176,7 +178,7 @@ local function main(mode, input, output)
 
       io.stdout:write('Wrote to ' .. output .. '\n')
    elseif mode == 'run' then
-      load(out)()
+      load(out)(table.unpack(table.move(arg, 3, #arg, 1, {})))
    else
       usage()
 
