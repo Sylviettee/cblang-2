@@ -4,6 +4,26 @@ local compiler = require 'cblang.compiler'
 local config = require 'cblang.config'
 local rex = require 'lpegrex'
 
+local bit32Override = { 'local M = {}' }
+
+do
+   local binOp = {
+      ['&'] = 'band',
+      ['|'] = 'bor',
+      ['~'] = 'bxor',
+      ['>>'] = 'rshift',
+      ['<<'] = 'lshift',
+   }
+
+   for op, name in pairs(binOp) do
+      table.insert(bit32Override, 'function M.' .. name .. '(a, b) return a ' .. op .. ' b end')
+   end
+
+   table.insert(bit32Override, 'function M.bnot(a) return ~a end')
+
+   table.insert(bit32Override, 'return M')
+end
+
 local function usage()
    io.write('Usage: cb <command> <args>\n')
    io.write('Commands:\n')
@@ -78,6 +98,54 @@ local function compile(file, isRan)
          single .. 'end\n' ..
          'end\n\n'
       )
+   end
+
+   -- Someday this could be included in some prelude file
+   do
+      local versionCheck = '(tonumber(_VERSION:sub(-3)) or 0)'
+      local lua53Check = versionCheck .. ' < 5.3'
+
+      if artifacts.compat == 'always' then
+         table.insert(
+            buff,
+            1,
+            -- TODO; bundle compat53 instead of requiring it
+            'if ' .. lua53Check .. ' and not pcall(require, \'compat53\') then\n' ..
+            single .. 'error(\'compat53 is required by this program\')\n' ..
+            'end\n\n'
+         )
+      elseif artifacts.compat == 'maybe' then
+         table.insert(
+            buff,
+            1,
+            'if ' .. lua53Check .. ' then\n' ..
+            single .. 'pcall(require, \'compat53\')\n' ..
+            'end\n\n'
+         )
+      end
+
+      if artifacts.bit then
+         local bitMangle = artifacts.bit
+
+         table.insert(
+            buff,
+            1,
+            'if _VERSION == \'Lua 5.1\' and not pcall(require, \'bit\') then\n' ..
+            single .. 'error(\'luabitop is required by this program\')\n' ..
+            'elseif _VERSION == \'Lua 5.1\' then\n' ..
+            single .. bitMangle .. ' = require \'bit\'\n' ..
+            'elseif _VERSION == \'Lua 5.2\' then\n' ..
+            single .. '---@diagnostic disable-next-line: undefined-global\n' ..
+            single .. bitMangle .. ' = bit32\n' ..
+            'elseif ' .. versionCheck .. ' > 5.2 then\n' ..
+            single .. bitMangle .. ' = load([[\n' ..
+            single .. single .. table.concat(bit32Override, '\n' .. single ..single) .. '\n' ..
+            single .. ']])()\n' ..
+            'end\n\n'
+         )
+
+         table.insert(hoist, bitMangle)
+      end
    end
 
    table.insert(buff, 1, 'local ' .. table.concat(hoist, ', ') .. '\n\n')
@@ -159,6 +227,10 @@ local function main(mode, input, output)
       end
 
       os.exit(-1)
+   end
+
+   if mode == 'run' then
+      config.target = _VERSION
    end
 
    local out = compile(input, mode == 'run')

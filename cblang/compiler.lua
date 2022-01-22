@@ -4,65 +4,95 @@ local checks = require 'cblang.checks'
 local parse = require 'cblang.parse'
 local rex = require 'lpegrex'
 
-local function globals()
+local globals
+
+do
    local g = { const = true, used = true, kind = 'global variable' }
 
-   return {
-      _G = g,
-      package = g,
-      rawlen = g,
-      loadfile = g,
-      pairs = g,
-      coroutine = g,
-      arg = g,
-      os = g,
-      table = g,
-      getmetatable = g,
-      ipairs = g,
-      tonumber = g,
-      pcall = g,
-      xpcall = g,
-      io = g,
-      select = g,
-      warn = g,
-      dofile = g,
-      debug = g,
-      utf8 = g,
-      math = g,
-      rawget = g,
-      _VERSION = g,
-      print = g,
-      rawequal = g,
-      type = g,
-      collectgarbage = g,
-      load = g,
-      error = g,
-      setmetatable = g,
-      assert = g,
-      next = g,
-      string = g,
-      tostring = g,
-      require = g,
-      rawset = g,
-   }
+   local function extend(tbl, ext)
+      for i, v in pairs(ext) do
+         tbl[i] = v
+      end
+
+      return tbl
+   end
+
+   local dep = extend({ deprecated = true }, g)
+   local compat = extend({ compat = 'always' }, g)
+
+   globals = function()
+      local v = tonumber(config.target:sub(-3)) or 5.1
+
+      local maybeCompat = v < 5.3 and extend({ compat = 'maybe' }, g) or g
+
+      return {
+         _G = g,
+         arg = g,
+         getmetatable = g,
+         tonumber = g,
+         select = g,
+         dofile = g,
+         rawget = g,
+         _VERSION = g,
+         print = g,
+         rawequal = g,
+         type = g,
+         collectgarbage = g,
+         error = g,
+         setmetatable = g,
+         next = g,
+         tostring = g,
+         require = g,
+         rawset = g,
+         package = maybeCompat,
+         loadfile = maybeCompat,
+         pairs = maybeCompat,
+         coroutine = maybeCompat,
+         os = maybeCompat,
+         table = maybeCompat,
+         ipairs = maybeCompat,
+         pcall = maybeCompat,
+         xpcall = maybeCompat,
+         io = maybeCompat,
+         debug = maybeCompat,
+         math = maybeCompat,
+         load = maybeCompat,
+         assert = maybeCompat,
+         string = maybeCompat,
+         rawlen = v < 5.2 and compat,
+         utf8 = v < 5.3 and compat,
+         getfenv = v == 5.1 and g or dep,
+         gcinfo = v == 5.1 and g or dep,
+         module = v == 5.1 and g or dep,
+         unpack = v == 5.1 and g or dep,
+         newproxy = v == 5.1 and g or dep,
+         setfenv = v == 5.1 and g or dep,
+         loadstring = v < 5.3 and g or dep,
+         -- Bit32 only existed in 5.2 and emulating it entirely would be
+         -- difficult to say the least
+         bit32 = extend({ bit = true }, g)
+      }
+   end
 end
 
----@alias ext table<any, any>?
+---@alias ext table<any, any>
 
 ---@class artifacts
 ---@field imports import[]
 ---@field errors error[]
 ---@field files table<string, compiler>
 ---@field cache cache
+---@field compat boolean
+---@field bit boolean
 
 ---@class import
 ---@field rewrite string
 ---@field kind string
 ---@field name string
----@field contents string[]?
----@field path string?
+---@field contents? string[]
+---@field path? string
 ---@field import boolean
----@field sym symbol?
+---@field sym? symbol
 
 ---@class cache
 ---@field includedSym table<symbol, boolean>
@@ -81,10 +111,13 @@ end
 ---@field kind string
 ---@field file string
 ---@field node baseNode
----@field const boolean?
+---@field const? boolean
 ---@field name string
----@field used boolean?
----@field rewrite string?
+---@field used? boolean
+---@field rewrite? string
+---@field deprecated? boolean
+---@field compat? string
+---@field bit? boolean
 
 ---@class baseNode: any
 ---@field pos integer
@@ -108,7 +141,7 @@ end
 ---@field symbols table<string, symbol>
 ---@field scopes table<string, variable>[]
 ---@field disabledUndef boolean?
----@field isRoot boolean?
+---@field isRoot? boolean
 ---@field file string
 local compiler = {}
 
@@ -253,7 +286,7 @@ end
 
 ---@param name string
 ---@param kind string
----@param ext table<any, any>?
+---@param ext? table<any, any>
 ---@return import
 function compiler:import(name, kind, ext)
    local import = {
@@ -360,7 +393,7 @@ end
 ---@param msg string
 ---@param code string
 ---@param node baseNode
----@param otherFile string?
+---@param otherFile? string
 function compiler:pushErr(msg, code, node, otherFile)
    table.insert(self.artifacts.errors, {
       msg = msg,
@@ -372,11 +405,14 @@ function compiler:pushErr(msg, code, node, otherFile)
 end
 
 ---@param node baseNode
----@param name string?
-function compiler:undefinedVar(node, name)
+---@param name? string
+---@param extra? string
+function compiler:undefinedVar(node, name, extra)
    if not self.disabledUndef then
       self:pushErr(
-         'undefined variable ' .. (name or node[1]),
+         'undefined variable '
+            .. (name or node[1])
+            .. (extra or ''),
          'undef-var',
          node
       )
@@ -386,7 +422,7 @@ function compiler:undefinedVar(node, name)
 end
 
 ---@param node baseNode
----@param name string?
+---@param name? string
 function compiler:shadowVar(node, name)
    local var = self:getVar(name or node[1])
 
@@ -402,8 +438,8 @@ function compiler:shadowVar(node, name)
 end
 
 ---@param node baseNode
----@param name string?
----@param otherFile string?
+---@param name? string
+---@param otherFile? string
 function compiler:unusedVar(node, name, otherFile)
    name = name or node[1]
 
@@ -421,7 +457,7 @@ function compiler:unusedVar(node, name, otherFile)
 end
 
 ---@param node baseNode
----@param name string?
+---@param name? string
 function compiler:unusedImport(node, name)
    name = name or node[1]
 
@@ -433,7 +469,7 @@ function compiler:unusedImport(node, name)
 end
 
 ---@param node baseNode
----@param name string?
+---@param name? string
 function compiler:badStatic(node, name)
    name = name or node[1]
 
@@ -445,7 +481,7 @@ function compiler:badStatic(node, name)
 end
 
 ---@param node baseNode
----@param name string?
+---@param name? string
 function compiler:assignConst(node, name)
    name = name or node[1]
 
@@ -470,6 +506,28 @@ function compiler:undefinedVararg(node)
    self:pushErr(
       'usage of vararg outside of vararg function',
       'outside-vararg',
+      node
+   )
+end
+
+---@param node baseNode
+---@param name? string
+function compiler:deprecatedVar(node, name, extra)
+   name = name or node[1]
+
+   self:pushErr(
+      'deprecated variable ' .. name .. (extra or ''),
+      'deprecated',
+      node
+   )
+end
+
+---@param node baseNode
+---@param extra string
+function compiler:undefinedSymbol(node, extra)
+   self:pushErr(
+      'undefined symbol' .. (extra or ''),
+      'undef-sym',
       node
    )
 end
@@ -501,6 +559,38 @@ function compiler:getVar(name)
    end
 
    return var
+end
+
+---@param var variable
+---@param name string
+---@param node baseNode
+function compiler:validateCompat(var, name, node)
+   if var.bit then
+      self:deprecatedVar(node, name, ', bit operators should be used instead')
+
+      return
+   end
+
+   if var.deprecated then
+      self:deprecatedVar(node, name)
+
+      return
+   end
+
+   -- no point in continuing if we already are have compat
+   if self.artifacts.compat == 'always' then
+      return
+   end
+
+   if var.compat == 'always' and not config.compat then
+      self:undefinedVar(node, name, ', variable does\'t exist in ' .. config.target)
+
+      return
+   end
+
+   if self.artifacts.compat ~= 'always' then
+      self.artifacts.compat = var.compat
+   end
 end
 
 ---@param name string
@@ -1256,6 +1346,8 @@ function compiler:Id(node)
       var.used = true
    end
 
+   self:validateCompat(var, node[1], node)
+
    if var.rewrite then
       return self:push(var.rewrite)
    end
@@ -1336,19 +1428,53 @@ function compiler:Paren(node)
    self:push(')')
 end
 
+local transformBinary = {
+   ['&'] = 'band',
+   ['|'] = 'bor',
+   ['~'] = 'bxor',
+   ['>>'] = 'rshift',
+   ['<<'] = 'lshift',
+}
+
 function compiler:BinaryOp(node)
+   if tonumber(config.target:sub(-3)) < 5.3 and transformBinary[node[2]] then
+      if config.target == 'Lua 5.1' then
+         if not config.compat then
+            self:undefinedSymbol(node, ', enable compat to use bit operators in Lua 5.1')
+         elseif not self.artifacts.bit then
+            self.artifacts.bit = self:mangleName('bit')
+         end
+      end
+
+      self:push(self.artifacts.bit, '.', transformBinary[node[2]], '(')
+
+      self:visit(node[1])
+
+      self:push(', ')
+
+      self:visit(node[3])
+
+      self:push(')')
+
+      return
+   end
+
    self:visit(node[1])
 
-   if node[2] == '^' then
-      self:push(node[2])
-   else
-      self:push(' ', node[2], ' ')
-   end
+   local space = node[2] == '^' and '' or ' '
+
+   self:push(space, node[2], space)
 
    self:visit(node[3])
 end
 
 function compiler:UnaryOp(node)
+   if tonumber(config.target:sub(-3)) < 5.3 and node[1] == '~' then
+      self:push(self.artifacts.bit, '.bnot(')
+      self:visit(node[2])
+      self:push(')')
+   end
+
    self:push(node[1], node[1] == 'not' and ' ' or '')
 
    self:visit(node[2])
@@ -1376,6 +1502,7 @@ local function drill(node, children)
    return children
 end
 
+---@param self compiler
 local function assemblyPath(self, node, hasMethod)
    local path = drill(node)
 
@@ -1393,6 +1520,8 @@ local function assemblyPath(self, node, hasMethod)
 
          if var then
             var.used = true
+
+            self:validateCompat(var, element, node)
          end
       end
 

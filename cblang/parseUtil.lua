@@ -90,7 +90,7 @@ opband   :BinaryOp <== `&`->'&' @exprbshift
 opbshift :BinaryOp <== (`<<`->'<<' / `>>`->'>>') @exprconcat
 opconcat :BinaryOp <== `..`->'..' @exprconcat
 oparit   :BinaryOp <== (`+`->'+' / `-`->'-') @exprfact
-opfact   :BinaryOp <== (`*`->'*' / `//`->'//' / `/`->'/' / `%`->'%') @exprunary
+opfact   :BinaryOp <== (`*`->'*' / `%/`->'//' / `/`->'/' / `%`->'%') @exprunary
 oppow    :BinaryOp <== `^`->'^' @exprunary
 opunary  :UnaryOp  <== (`not`->'not' / `#`->'#' / `-`->'-' / `~`->'~') @exprunary
 

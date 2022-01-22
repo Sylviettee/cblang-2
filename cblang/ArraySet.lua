@@ -6,7 +6,7 @@
 ---@field set table<any, any>
 local ArraySet = {}
 
----@param arr table<any, any>
+---@param arr? table<any, any>
 function ArraySet.new(arr)
    arr = arr or {}
 

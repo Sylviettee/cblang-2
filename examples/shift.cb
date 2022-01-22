@@ -1,0 +1,5 @@
+class Main {
+   function Main(n1, n2) {
+      print(tonumber(n1) << tonumber(n2));
+   }
+}
