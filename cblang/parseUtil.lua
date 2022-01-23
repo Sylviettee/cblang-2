@@ -46,7 +46,7 @@ If            <== `if` @`(` @expr @`)` @`{` Block @`}`
                   (`else` @`{` Block @`}`)?
 ForNum        <== `for` @`(` Id `=` @expr @`,` @expr (`,` @expr)? `)` @`{` Block @`}`
 ForIn         <== `for` @`(` @idlist `in` @exprlist @`)` @`{` Block @`}`
-VarDecl       <== `local` @iddecllist (`=` @exprlist)? @`;`
+VarDecl       <== `local` iddecllist (`=` @exprlist)? @`;`
 Assign        <== varlist {ASSIGN_OP}? `=` @exprlist  @`;`
 
 Number        <== NUMBER->tonumber SKIP
@@ -141,7 +141,7 @@ ASSIGN_OP     <-- '+' / '-' / '*' / '//' / '/' / '%' / '^' /
                   '|' / '~' / '&' / '<<' / '>>' / '..' /
                   'and' / 'or'
 
-NAME          <-- !KEYWORD {NAME_PREFIX NAME_SUFFIX?} SKIP
+NAME          <-- (!KEYWORD)^Expected_Id (!'__M')^Expected_NoMangle {NAME_PREFIX NAME_SUFFIX?} SKIP
 NAME_PREFIX   <-- [_a-zA-Z]
 NAME_SUFFIX   <-- [_a-zA-Z0-9]+
 

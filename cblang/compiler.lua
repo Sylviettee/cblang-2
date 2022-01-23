@@ -1,6 +1,7 @@
 local ArraySet = require 'cblang.ArraySet'
 local config = require 'cblang.config'
 local checks = require 'cblang.checks'
+local errors = require 'cblang.errors'
 local parse = require 'cblang.parse'
 local rex = require 'lpegrex'
 
@@ -186,7 +187,7 @@ function compiler.compile(file, artifacts, isRoot)
          '%u:%u: %s\n%s\n%s',
          err.line,
          err.col,
-         err.tag,
+         errors[err.tag],
          err.details,
          string.rep(' ', err.col - 1) .. '^'
       )

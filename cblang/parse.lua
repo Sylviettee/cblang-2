@@ -2,12 +2,12 @@ local util = require 'cblang.parseUtil'
 local rex = require 'lpegrex'
 
 local grammar = rex.compile([[
-Chunk         <== SKIP Include* Class* !.^ExpectedEof
+Chunk         <== SKIP Include* Class* !.^Expected_Eof
 
-Include       <-- (BaseInclude / FromNative / FromNativeRef) `;`
+Include       <-- (BaseInclude / FromNative / FromNativeRef) @`;`
 BaseInclude   <== `include` @Path
 FromNative    <== `from` @`native` `include` @Path
-FromNativeRef <== `from` @`native` `reference` @Path
+FromNativeRef <== `from` @`native` @`reference` @Path
 Path          <-| Id (`.` @Id)*
 
 Class         <== `class` @Id Args? ClassBody
@@ -23,7 +23,7 @@ Varargs       <== `...`
 
 Statement     <== %LuaStatement
 
-NAME          <-- !KEYWORD {NAME_PREFIX NAME_SUFFIX?} SKIP
+NAME          <-- (!KEYWORD)^Expected_Id (!'__M')^Expected_NoMangle {NAME_PREFIX NAME_SUFFIX?} SKIP
 NAME_PREFIX   <-- [_a-zA-Z]
 NAME_SUFFIX   <-- [_a-zA-Z0-9]+
 
