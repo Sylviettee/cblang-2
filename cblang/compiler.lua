@@ -1,5 +1,4 @@
 local ArraySet = require 'cblang.ArraySet'
-local config = require 'cblang.config'
 local checks = require 'cblang.checks'
 local errors = require 'cblang.errors'
 local parse = require 'cblang.parse'
@@ -21,9 +20,7 @@ do
    local dep = extend({ deprecated = true }, g)
    local compat = extend({ compat = 'always' }, g)
 
-   globals = function()
-      local v = tonumber(config.target:sub(-3)) or 5.1
-
+   globals = function(v)
       local maybeCompat = v < 5.3 and extend({ compat = 'maybe' }, g) or g
 
       return {
@@ -85,6 +82,7 @@ end
 ---@field cache cache
 ---@field compat boolean
 ---@field bit boolean
+---@field config config
 
 ---@class import
 ---@field rewrite string
@@ -104,6 +102,13 @@ end
 ---@field start integer
 ---@field stop integer
 ---@field file string
+
+---@class config
+---@field indentType 'space'|'tab'
+---@field indentSize integer
+---@field target number
+---@field compat boolean
+---@field path string
 
 ---@class variables: variable
 ---@field __array boolean
@@ -144,13 +149,15 @@ end
 ---@field disabledUndef boolean?
 ---@field isRoot? boolean
 ---@field file string
+---@field config config
 local compiler = {}
 
 ---@param file string|file*
 ---@param artifacts artifacts
 ---@return compiler
-function compiler.compile(file, artifacts, isRoot)
+function compiler.compile(file, artifacts, isRoot, config)
    artifacts = artifacts or {
+      config = config,
       imports = {},
       errors = {},
       files = {},
@@ -158,6 +165,8 @@ function compiler.compile(file, artifacts, isRoot)
         includedSym = {}
       },
    }
+
+   config = artifacts.config
 
    local source
 
@@ -194,8 +203,9 @@ function compiler.compile(file, artifacts, isRoot)
    end
 
    local self = setmetatable({
+      variables = globals(config.target),
+      config = artifacts.config,
       artifacts = artifacts,
-      variables = globals(),
       source = source,
       isRoot = isRoot,
       toCheck = {},
@@ -383,8 +393,8 @@ end
 
 ---@vararg string
 function compiler:pushIndent(...)
-   local indent = config.indentType == 'space' and ' ' or '\t'
-   local size = indent == ' ' and config.indentSize or 1
+   local indent = self.config.indentType == 'space' and ' ' or '\t'
+   local size = indent == ' ' and self.config.indentSize or 1
 
    self:push(string.rep(indent, (#self.scopes - 1) * size), ...)
 end
@@ -583,8 +593,8 @@ function compiler:validateCompat(var, name, node)
       return
    end
 
-   if var.compat == 'always' and not config.compat then
-      self:undefinedVar(node, name, ', variable does\'t exist in ' .. config.target)
+   if var.compat == 'always' and not self.config.compat then
+      self:undefinedVar(node, name, ', variable does\'t exist in ' .. self.config.target)
 
       return
    end
@@ -734,7 +744,7 @@ function compiler:BaseInclude(node)
 
    local file
 
-   for path in config.path:gmatch('[^;]+') do
+   for path in self.config.path:gmatch('[^;]+') do
       path = path
          :gsub('?', adjustedPath)
          :gsub('%.lua$', '.cb')
@@ -1438,16 +1448,20 @@ local transformBinary = {
 }
 
 function compiler:BinaryOp(node)
-   if tonumber(config.target:sub(-3)) < 5.3 and transformBinary[node[2]] then
-      if config.target == 'Lua 5.1' then
+   local config = self.config
+
+   if config.target < 5.3 and transformBinary[node[2]] then
+      if config.target == 5.1 then
          if not config.compat then
             self:undefinedSymbol(node, ', enable compat to use bit operators in Lua 5.1')
          elseif not self.artifacts.bit then
             self.artifacts.bit = self:mangleName('bit')
          end
+      else
+         self.artifacts.bit = 'bit32'
       end
 
-      self:push(self.artifacts.bit, '.', transformBinary[node[2]], '(')
+      self:push(self.artifacts.bit or 'bit', '.', transformBinary[node[2]], '(')
 
       self:visit(node[1])
 
@@ -1470,7 +1484,7 @@ function compiler:BinaryOp(node)
 end
 
 function compiler:UnaryOp(node)
-   if tonumber(config.target:sub(-3)) < 5.3 and node[1] == '~' then
+   if self.config.target < 5.3 and node[1] == '~' then
       self:push(self.artifacts.bit, '.bnot(')
       self:visit(node[2])
       self:push(')')

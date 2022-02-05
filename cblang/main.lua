@@ -1,8 +1,47 @@
 require 'cblang.minicompat'
 
 local compiler = require 'cblang.compiler'
-local config = require 'cblang.config'
+local argparse = require 'argparse'
 local rex = require 'lpegrex'
+
+local parser = argparse('cb')
+   :add_complete()
+
+do
+
+   local build = parser:command('build')
+      :summary('Compile the input.')
+
+   build:argument('input', 'Read input from <input>.')
+
+   build:argument('output', 'Write output to <output>.')
+      :args('?')
+
+   build:option('--target', 'The target to build for.', 5.4)
+      -- Every version has some different code gen
+      :choices { '5.1', '5.2', '5.3', '5.4' }
+      :convert(tonumber)
+
+   build:option('--indent-type', 'The kind of indent to use.', 'space')
+      :choices { 'space', 'tab' }
+      :target 'indentType'
+
+   build:option('--indent-size', 'The size of indent to use.', 3)
+      :convert(tonumber)
+      :target 'indentSize'
+
+   build:flag('--no-compat', 'Whether to disable compatibility code or not.')
+      :action(function(args)
+         args.compat = false
+      end)
+
+   local run = parser:command('run')
+      :summary('Run the input file.')
+
+   run:argument('input', 'Read input from <input>.')
+   run:argument('args', 'Arguments to pass to the script.')
+      :args('*')
+end
 
 local bit32Override = { 'local M = {}' }
 
@@ -24,15 +63,8 @@ do
    table.insert(bit32Override, 'return M')
 end
 
-local function usage()
-   io.write('Usage: cb <command> <args>\n')
-   io.write('Commands:\n')
-   io.write('\tbuild\tBuild the CBLang-2 script into a Lua file\n')
-   io.write('\trun\tRuns the CBLang-2 script\n')
-end
-
-local function compile(file, isRan)
-   local res, err = compiler.compile(file, nil, true)
+local function compile(file, config)
+   local res, err = compiler.compile(file, nil, true, config)
 
    if not res then
       io.stderr:write(err .. '\n')
@@ -151,6 +183,7 @@ local function compile(file, isRan)
    table.insert(buff, 1, 'local ' .. table.concat(hoist, ', ') .. '\n\n')
 
    local mainExport = res.exports.Main
+   local isRan = config.ran
 
    if not isRan and mainExport and mainExport.hasMain then
       table.insert(
@@ -210,32 +243,24 @@ local function compile(file, isRan)
    return buff
 end
 
-local function main(mode, input, output)
-   if not mode then
-      usage()
+local function main()
+   local args = parser:parse()
 
-      os.exit(-1)
+   args.path = os.getenv('CB_PATH') or package.path:gsub('%.lua', '.cb')
+
+   args.compat = args.compat == nil and true
+
+   if args.run then
+      args.target = tonumber(_VERSION:sub(-3))
    end
 
-   if not input then
-      if mode == 'build' then
-         io.write('Usage: cb build <input> [output]\n')
-      elseif mode == 'run' then
-         io.write('Usage: cb run <input>\n')
-      else
-         usage()
-      end
+   local input = args.input
 
-      os.exit(-1)
-   end
+   local out = compile(input, args)
 
-   if mode == 'run' then
-      config.target = _VERSION
-   end
+   if args.build then
+      local output = args.output
 
-   local out = compile(input, mode == 'run')
-
-   if mode == 'build' then
       if not output then
          output = (input:match('^(.-)%.cb$') or input) .. '.lua'
       end
@@ -249,13 +274,11 @@ local function main(mode, input, output)
       end
 
       io.stdout:write('Wrote to ' .. output .. '\n')
-   elseif mode == 'run' then
-      load(out)(table.unpack(table.move(arg, 3, #arg, 1, {})))
-   else
-      usage()
 
-      os.exit(-1)
+      return
    end
+
+   load(out)(table.unpack(args.args))
 end
 
-main(...)
+main()
